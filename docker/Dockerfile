@@ -1,11 +1,5 @@
 # Inherit from the Drupal 9 image on Docker Hub.
-FROM drupal:9.5
-
-# Set the farmOS and composer project repository URLs and versions.
-ARG FARMOS_REPO=https://github.com/farmOS/farmOS.git
-ARG FARMOS_VERSION=2.x
-ARG PROJECT_REPO=https://github.com/farmOS/composer-project.git
-ARG PROJECT_VERSION=2.x
+FROM drupal:9.5 as base
 
 # Set Apache ServerName directive globally to suppress AH00558 message.
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
@@ -68,6 +62,14 @@ RUN apt-get update \
 
 # Set the COMPOSER_MEMORY_LIMIT environment variable to unlimited.
 ENV COMPOSER_MEMORY_LIMIT=-1
+
+FROM base
+
+# Set the farmOS and composer project repository URLs and versions.
+ARG FARMOS_REPO=https://github.com/farmOS/farmOS.git
+ARG FARMOS_VERSION=2.x
+ARG PROJECT_REPO=https://github.com/farmOS/composer-project.git
+ARG PROJECT_VERSION=2.x
 
 # Add the build-farmOS.sh script.
 COPY build-farmOS.sh /usr/local/bin/

@@ -16,6 +16,11 @@ jobs:
   build:
     name: Build Docker images
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v3
@@ -34,27 +39,53 @@ jobs:
         run: |
           echo "FARMOS_VERSION=${GITHUB_HEAD_REF}" >> $GITHUB_ENV
           echo "FARMOS_REPO=${{ github.event.pull_request.head.repo.full_name }}" >> $GITHUB_ENV
-      - name: Build and save farmOS 2.x Docker image
+      - name: Set PLATFORM for use in cache.
         run: |
-          docker build --build-arg FARMOS_REPO=https://github.com/${FARMOS_REPO} --build-arg FARMOS_VERSION=${FARMOS_VERSION} -t farmos/farmos:2.x docker
-          docker save farmos/farmos:2.x > /tmp/farmos-2x.tar
+          TEMP_PLATFORM=${{ matrix.platform }}
+          echo "PLATFORM=${TEMP_PLATFORM////-}" >> $GITHUB_ENV
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Build and save farmOS 2.x Docker image
+        uses: docker/build-push-action@v4
+        with:
+          push: false
+          context: docker
+          build-args: |
+            FARMOS_REPO=https://github.com/${{ env.FARMOS_REPO }}
+            FARMOS_VERSION=${{ env.FARMOS_VERSION }}
+          tags: farmos/farmos:2.x
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=farmos-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=farmos-${{ matrix.platform }}
+          outputs: type=docker,dest=/tmp/farmos-${{ env.PLATFORM }}.tar
       - name: Cache farmOS 2.x Docker image
         uses: actions/cache@v3
         with:
-          path: /tmp/farmos-2x.tar
-          key: farmos-2x-${{ github.run_id }}
+          path: /tmp/farmos-${{ env.PLATFORM }}.tar
+          key: farmos-2x-${{ env.PLATFORM }}-${{ github.run_id }}
       # This builds the dev Docker image using the specified FARMOS_VERSION,
       # but notably it does NOT override the default PROJECT_VERSION, so the
       # farmOS Composer project 2.x branch is always used.
       - name: Build and save farmOS 2.x-dev Docker image
-        run: |
-          docker build --build-arg FARMOS_REPO=https://github.com/${FARMOS_REPO} --build-arg FARMOS_VERSION=${FARMOS_VERSION} -t farmos/farmos:2.x-dev docker/dev
-          docker save farmos/farmos:2.x-dev > /tmp/farmos-2x-dev.tar
+        uses: docker/build-push-action@v4
+        with:
+          push: false
+          context: docker/dev
+          build-args: |
+            FARMOS_REPO=https://github.com/${{ env.FARMOS_REPO }}
+            FARMOS_VERSION=${{ env.FARMOS_VERSION }}
+          tags: farmos/farmos:2.x-dev
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=farmos-dev-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=farmos-dev-${{ matrix.platform }}
+          outputs: type=docker,dest=/tmp/farmos-dev-${{ env.PLATFORM }}.tar
       - name: Cache farmOS 2.x-dev Docker image
         uses: actions/cache@v3
         with:
-          path: /tmp/farmos-2x-dev.tar
-          key: farmos-2x-dev-${{ github.run_id }}
+          path: /tmp/farmos-dev-${{ env.PLATFORM }}.tar
+          key: farmos-2x-dev-${{ env.PLATFORM }}-${{ github.run_id }}
     outputs:
       farmos_version: ${{ env.FARMOS_VERSION }}
   sniff:
@@ -67,10 +98,10 @@ jobs:
       - name: Restore farmOS 2.x-dev Docker image from cache
         uses: actions/cache@v3
         with:
-          path: /tmp/farmos-2x-dev.tar
-          key: farmos-2x-dev-${{ github.run_id }}
+          path: /tmp/farmos-dev-linux-amd64.tar
+          key: farmos-2x-dev-linux-amd64-${{ github.run_id }}
       - name: Load farmos/farmos:2.x-dev image
-        run: docker load < /tmp/farmos-2x-dev.tar
+        run: docker load < /tmp/farmos-dev-linux-amd64.tar
       - name: Run PHP CodeSniffer
         run: docker run farmos/farmos:2.x-dev phpcs /opt/drupal/web/profiles/farm
       - name: Run PHPStan
@@ -107,10 +138,10 @@ jobs:
       - name: Restore farmOS 2.x-dev Docker image from cache
         uses: actions/cache@v3
         with:
-          path: /tmp/farmos-2x-dev.tar
-          key: farmos-2x-dev-${{ github.run_id }}
+          path: /tmp/farmos-dev-linux-amd64.tar
+          key: farmos-2x-dev-linux-amd64-${{ github.run_id }}
       - name: Load farmos/farmos:2.x-dev image
-        run: docker load < /tmp/farmos-2x-dev.tar
+        run: docker load < /tmp/farmos-dev-linux-amd64.tar
       # Build a new docker-compose.yml file from docker-compose.testing.common + docker-compose.testing.{dbms}.yml.
       # Copy to the current directory so that farmOS volume mounts don't change to the docker/www folder.
       - name: Create docker-compose.yml
@@ -143,10 +174,10 @@ jobs:
       - name: Restore farmOS 2.x Docker image from cache
         uses: actions/cache@v3
         with:
-          path: /tmp/farmos-2x.tar
-          key: farmos-2x-${{ github.run_id }}
+          path: /tmp/farmos-linux-amd64.tar
+          key: farmos-2x-linux-amd64-${{ github.run_id }}
       - name: Load farmos/farmos:2.x image
-        run: docker load < /tmp/farmos-2x.tar
+        run: docker load < /tmp/farmos-linux-amd64.tar
       - name: Run farmOS Docker container
         run: docker run --rm -v /tmp/farmOS:/opt/drupal farmos/farmos:2.x true
       - name: Create artifact
