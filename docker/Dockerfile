@@ -18,17 +18,7 @@ RUN apt-get update && apt-get install -y libgeos-dev \
 RUN docker-php-ext-install bcmath
 
 # Inherit from the official Drupal 10 image.
-FROM drupal:10.1
-
-# Set the farmOS and composer project repository URLs and versions.
-ARG FARMOS_REPO=https://github.com/farmOS/farmOS.git
-ARG FARMOS_VERSION=3.x
-ARG PROJECT_REPO=https://github.com/farmOS/composer-project.git
-ARG PROJECT_VERSION=3.x
-
-# Declare the git commit hash argument used for build cache invalidation between
-# different commits on the same branch in GitHub actions.
-ARG GIT_COMMIT=unknown
+FROM drupal:10.1 as farmos-base
 
 # Set Apache ServerName directive globally to suppress AH00558 message.
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
@@ -50,6 +40,18 @@ RUN apt-get update && apt-get install -y \
     libgeos-c1v5 \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean
+
+FROM farmos-base
+
+# Set the farmOS and composer project repository URLs and versions.
+ARG FARMOS_REPO=https://github.com/farmOS/farmOS.git
+ARG FARMOS_VERSION=3.x
+ARG PROJECT_REPO=https://github.com/farmOS/composer-project.git
+ARG PROJECT_VERSION=3.x
+
+# Declare the git commit hash argument used for build cache invalidation between
+# different commits on the same branch in GitHub actions.
+ARG GIT_COMMIT=unknown
 
 # Set the COMPOSER_MEMORY_LIMIT environment variable to unlimited.
 ENV COMPOSER_MEMORY_LIMIT=-1
