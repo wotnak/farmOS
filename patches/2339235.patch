@@ -1,0 +1,713 @@
+diff --git a/core/modules/node/node.views.inc b/core/modules/node/node.views.inc
+index 83e2ccf..53b5ff8 100644
+--- a/core/modules/node/node.views.inc
++++ b/core/modules/node/node.views.inc
+@@ -5,6 +5,7 @@
+  * Provide views data for node.module.
+  */
+ 
++use Drupal\field\FieldStorageConfigInterface;
+ use Drupal\user\RoleInterface;
+ use Drupal\views\ViewExecutable;
+ use Drupal\user\Entity\Role;
+@@ -50,3 +51,71 @@ function node_views_analyze(ViewExecutable $view) {
+ 
+   return $ret;
+ }
++
++/**
++ * Implements hook_views_data_alter().
++ */
++function node_views_data_alter(&$data) {
++  if (\Drupal::moduleHandler()->moduleExists('taxonomy')) {
++    $data['node_field_data']['term_node_tid'] = [
++      'title' => t('Taxonomy terms on node'),
++      'help' => t('Relate nodes to taxonomy terms, specifying which vocabulary or vocabularies to use. This relationship will cause duplicated records if there are multiple terms.'),
++      'relationship' => [
++        'id' => 'node_term_data',
++        'label' => t('term'),
++        'base' => 'taxonomy_term_field_data',
++      ],
++      'field' => [
++        'title' => t('All taxonomy terms'),
++        'help' => t('Display all taxonomy terms associated with a node from specified vocabularies.'),
++        'id' => 'taxonomy_index_tid',
++        'no group by' => TRUE,
++        'click sortable' => FALSE,
++      ],
++    ];
++
++    $data['node_field_data']['term_node_tid_depth'] = [
++      'help' => t('Display content if it has the selected taxonomy terms, or children of the selected terms. Due to additional complexity, this has fewer options than the versions without depth.'),
++      'real field' => 'nid',
++      'argument' => [
++        'title' => t('Has taxonomy term ID (with depth)'),
++        'id' => 'taxonomy_index_tid_depth',
++        'accept depth modifier' => TRUE,
++      ],
++      'filter' => [
++        'title' => t('Has taxonomy terms (with depth)'),
++        'id' => 'taxonomy_index_tid_depth',
++      ],
++    ];
++
++    $data['node_field_data']['term_node_tid_depth_modifier'] = [
++      'title' => t('Has taxonomy term ID depth modifier'),
++      'help' => t('Allows the "depth" for Taxonomy: Term ID (with depth) to be modified via an additional contextual filter value.'),
++      'argument' => [
++        'id' => 'taxonomy_index_tid_depth_modifier',
++      ],
++    ];
++  }
++}
++
++/**
++ * Implements hook_field_views_data_alter().
++ *
++ * Views integration for entity reference fields which reference taxonomy terms.
++ * Adds a term relationship to the default field data.
++ *
++ * @see views_field_default_views_data()
++ */
++function node_field_views_data_alter(array &$data, FieldStorageConfigInterface $field_storage) {
++  if (\Drupal::moduleHandler()->moduleExists('taxonomy')) {
++    if ($field_storage->getType() == 'entity_reference' && $field_storage->getSetting('target_type') == 'taxonomy_term') {
++      foreach ($data as $table_name => $table_data) {
++        foreach ($table_data as $field_name => $field_data) {
++          if (isset($field_data['filter']) && $field_name != 'delta') {
++            $data[$table_name][$field_name]['filter']['id'] = 'taxonomy_index_tid';
++          }
++        }
++      }
++    }
++  }
++}
+diff --git a/core/modules/node/src/NodeViewsData.php b/core/modules/node/src/NodeViewsData.php
+index 2f3a837..f763383 100644
+--- a/core/modules/node/src/NodeViewsData.php
++++ b/core/modules/node/src/NodeViewsData.php
+@@ -347,6 +347,109 @@ public function getViewsData() {
+       }
+     }
+ 
++    if (\Drupal::moduleHandler()->moduleExists('taxonomy')) {
++      $data += $this->taxonomyIntegration();
++    }
++
++    return $data;
++  }
++
++  /**
++   * Provides views integration related to the taxonomy module.
++   *
++   * @return array
++   */
++  protected function taxonomyIntegration() {
++    $data['taxonomy_index']['table']['group'] = $this->t('Taxonomy term');
++
++    $data['taxonomy_index']['table']['join'] = [
++      'taxonomy_term_field_data' => [
++        // links directly to taxonomy_term_field_data via tid
++        'left_field' => 'tid',
++        'field' => 'tid',
++      ],
++      'node_field_data' => [
++        // links directly to node via nid
++        'left_field' => 'nid',
++        'field' => 'nid',
++      ],
++      'taxonomy_term__parent' => [
++        'left_field' => 'entity_id',
++        'field' => 'tid',
++      ],
++    ];
++
++    $data['taxonomy_index']['nid'] = [
++      'title' => $this->t('Content with term'),
++      'help' => $this->t('Relate all content tagged with a term.'),
++      'relationship' => [
++        'id' => 'standard',
++        'base' => 'node_field_data',
++        'base field' => 'nid',
++        'label' => $this->t('node'),
++        'skip base' => 'node_field_data',
++      ],
++    ];
++
++    // @todo This stuff needs to move to a node field since really it's all
++    //   about nodes.
++    $data['taxonomy_index']['tid'] = [
++      'group' => $this->t('Content'),
++      'title' => $this->t('Has taxonomy term ID'),
++      'help' => $this->t('Display content if it has the selected taxonomy terms.'),
++      'argument' => [
++        'id' => 'taxonomy_index_tid',
++        'name table' => 'taxonomy_term_field_data',
++        'name field' => 'name',
++        'empty field name' => $this->t('Uncategorized'),
++        'numeric' => TRUE,
++        'skip base' => 'taxonomy_term_field_data',
++      ],
++      'filter' => [
++        'title' => $this->t('Has taxonomy term'),
++        'id' => 'taxonomy_index_tid',
++        'hierarchy table' => 'taxonomy_term__parent',
++        'numeric' => TRUE,
++        'skip base' => 'taxonomy_term_field_data',
++        'allow empty' => TRUE,
++      ],
++    ];
++
++    $data['taxonomy_index']['status'] = [
++      'title' => $this->t('Publish status'),
++      'help' => $this->t('Whether or not the content related to a term is published.'),
++      'filter' => [
++        'id' => 'boolean',
++        'label' => $this->t('Published status'),
++        'type' => 'yes-no',
++      ],
++    ];
++
++    $data['taxonomy_index']['sticky'] = [
++      'title' => $this->t('Sticky status'),
++      'help' => $this->t('Whether or not the content related to a term is sticky.'),
++      'filter' => [
++        'id' => 'boolean',
++        'label' => $this->t('Sticky status'),
++        'type' => 'yes-no',
++      ],
++      'sort' => [
++        'id' => 'standard',
++        'help' => $this->t('Whether or not the content related to a term is sticky. To list sticky content first, set this to descending.'),
++      ],
++    ];
++
++    $data['taxonomy_index']['created'] = [
++      'title' => $this->t('Post date'),
++      'help' => $this->t('The date the content related to a term was posted.'),
++      'sort' => [
++        'id' => 'date',
++      ],
++      'filter' => [
++        'id' => 'date',
++      ],
++    ];
++
+     return $data;
+   }
+ 
+diff --git a/core/modules/taxonomy/src/TermViewsData.php b/core/modules/taxonomy/src/TermViewsData.php
+index d02ea66..b6af132 100644
+--- a/core/modules/taxonomy/src/TermViewsData.php
++++ b/core/modules/taxonomy/src/TermViewsData.php
+@@ -135,96 +135,6 @@ public function getViewsData() {
+       ],
+     ];
+ 
+-    $data['taxonomy_index']['table']['group'] = $this->t('Taxonomy term');
+-
+-    $data['taxonomy_index']['table']['join'] = [
+-      'taxonomy_term_field_data' => [
+-        // links directly to taxonomy_term_field_data via tid
+-        'left_field' => 'tid',
+-        'field' => 'tid',
+-      ],
+-      'node_field_data' => [
+-        // links directly to node via nid
+-        'left_field' => 'nid',
+-        'field' => 'nid',
+-      ],
+-      'taxonomy_term__parent' => [
+-        'left_field' => 'entity_id',
+-        'field' => 'tid',
+-      ],
+-    ];
+-
+-    $data['taxonomy_index']['nid'] = [
+-      'title' => $this->t('Content with term'),
+-      'help' => $this->t('Relate all content tagged with a term.'),
+-      'relationship' => [
+-        'id' => 'standard',
+-        'base' => 'node_field_data',
+-        'base field' => 'nid',
+-        'label' => $this->t('node'),
+-        'skip base' => 'node_field_data',
+-      ],
+-    ];
+-
+-    // @todo This stuff needs to move to a node field since really it's all
+-    //   about nodes.
+-    $data['taxonomy_index']['tid'] = [
+-      'group' => $this->t('Content'),
+-      'title' => $this->t('Has taxonomy term ID'),
+-      'help' => $this->t('Display content if it has the selected taxonomy terms.'),
+-      'argument' => [
+-        'id' => 'taxonomy_index_tid',
+-        'name table' => 'taxonomy_term_field_data',
+-        'name field' => 'name',
+-        'empty field name' => $this->t('Uncategorized'),
+-        'numeric' => TRUE,
+-        'skip base' => 'taxonomy_term_field_data',
+-      ],
+-      'filter' => [
+-        'title' => $this->t('Has taxonomy term'),
+-        'id' => 'taxonomy_index_tid',
+-        'hierarchy table' => 'taxonomy_term__parent',
+-        'numeric' => TRUE,
+-        'skip base' => 'taxonomy_term_field_data',
+-        'allow empty' => TRUE,
+-      ],
+-    ];
+-
+-    $data['taxonomy_index']['status'] = [
+-      'title' => $this->t('Publish status'),
+-      'help' => $this->t('Whether or not the content related to a term is published.'),
+-      'filter' => [
+-        'id' => 'boolean',
+-        'label' => $this->t('Published status'),
+-        'type' => 'yes-no',
+-      ],
+-    ];
+-
+-    $data['taxonomy_index']['sticky'] = [
+-      'title' => $this->t('Sticky status'),
+-      'help' => $this->t('Whether or not the content related to a term is sticky.'),
+-      'filter' => [
+-        'id' => 'boolean',
+-        'label' => $this->t('Sticky status'),
+-        'type' => 'yes-no',
+-      ],
+-      'sort' => [
+-        'id' => 'standard',
+-        'help' => $this->t('Whether or not the content related to a term is sticky. To list sticky content first, set this to descending.'),
+-      ],
+-    ];
+-
+-    $data['taxonomy_index']['created'] = [
+-      'title' => $this->t('Post date'),
+-      'help' => $this->t('The date the content related to a term was posted.'),
+-      'sort' => [
+-        'id' => 'date',
+-      ],
+-      'filter' => [
+-        'id' => 'date',
+-      ],
+-    ];
+-
+     // Link to self through left.parent = right.tid (going down in depth).
+     $data['taxonomy_term__parent']['table']['join']['taxonomy_term__parent'] = [
+       'left_field' => 'entity_id',
+diff --git a/core/modules/taxonomy/taxonomy.info.yml b/core/modules/taxonomy/taxonomy.info.yml
+index 2f95462..76dea9d 100644
+--- a/core/modules/taxonomy/taxonomy.info.yml
++++ b/core/modules/taxonomy/taxonomy.info.yml
+@@ -4,6 +4,5 @@ description: 'Enables the categorization of content.'
+ package: Core
+ version: VERSION
+ dependencies:
+-  - drupal:node
+   - drupal:text
+ configure: entity.taxonomy_vocabulary.collection
+diff --git a/core/modules/taxonomy/taxonomy.tokens.inc b/core/modules/taxonomy/taxonomy.tokens.inc
+index f6cfc62..9e96b4e 100644
+--- a/core/modules/taxonomy/taxonomy.tokens.inc
++++ b/core/modules/taxonomy/taxonomy.tokens.inc
+@@ -36,10 +36,7 @@ function taxonomy_token_info() {
+     'name' => t("Description"),
+     'description' => t("The optional description of the taxonomy term."),
+   ];
+-  $term['node-count'] = [
+-    'name' => t("Node count"),
+-    'description' => t("The number of nodes tagged with the taxonomy term."),
+-  ];
++
+   $term['url'] = [
+     'name' => t("URL"),
+     'description' => t("The URL of the taxonomy term."),
+@@ -58,10 +55,7 @@ function taxonomy_token_info() {
+     'name' => t("Description"),
+     'description' => t("The optional description of the taxonomy vocabulary."),
+   ];
+-  $vocabulary['node-count'] = [
+-    'name' => t("Node count"),
+-    'description' => t("The number of nodes tagged with terms belonging to the taxonomy vocabulary."),
+-  ];
++
+   $vocabulary['term-count'] = [
+     'name' => t("Term count"),
+     'description' => t("The number of terms belonging to the taxonomy vocabulary."),
+@@ -79,6 +73,17 @@ function taxonomy_token_info() {
+     'type' => 'term',
+   ];
+ 
++  if (\Drupal::moduleHandler()->moduleExists('node')) {
++    $term['node-count'] = [
++      'name' => t("Node count"),
++      'description' => t("The number of nodes tagged with the taxonomy term."),
++    ];
++    $vocabulary['node-count'] = [
++      'name' => t("Node count"),
++      'description' => t("The number of nodes tagged with terms belonging to the taxonomy vocabulary."),
++    ];
++  }
++
+   return [
+     'types' => $types,
+     'tokens' => [
+@@ -93,6 +98,7 @@ function taxonomy_token_info() {
+  */
+ function taxonomy_tokens($type, $tokens, array $data, array $options, BubbleableMetadata $bubbleable_metadata) {
+   $token_service = \Drupal::token();
++  $node_module_installed = \Drupal::moduleHandler()->moduleExists('node');
+ 
+   $replacements = [];
+   if ($type == 'term' && !empty($data['term'])) {
+@@ -119,11 +125,13 @@ function taxonomy_tokens($type, $tokens, array $data, array $options, Bubbleable
+           break;
+ 
+         case 'node-count':
+-          $query = \Drupal::database()->select('taxonomy_index');
+-          $query->condition('tid', $term->id());
+-          $query->addTag('term_node_count');
+-          $count = $query->countQuery()->execute()->fetchField();
+-          $replacements[$original] = $count;
++          if ($node_module_installed) {
++            $query = \Drupal::database()->select('taxonomy_index');
++            $query->condition('tid', $term->id());
++            $query->addTag('term_node_count');
++            $count = $query->countQuery()->execute()->fetchField();
++            $replacements[$original] = $count;
++          }
+           break;
+ 
+         case 'vocabulary':
+@@ -186,8 +194,10 @@ function taxonomy_tokens($type, $tokens, array $data, array $options, Bubbleable
+           break;
+ 
+         case 'node-count':
+-          $taxonomy_storage = \Drupal::entityTypeManager()->getStorage('taxonomy_term');
+-          $replacements[$original] = $taxonomy_storage->nodeCount($vocabulary->id());
++          if ($node_module_installed) {
++            $taxonomy_storage = \Drupal::entityTypeManager()->getStorage('taxonomy_term');
++            $replacements[$original] = $taxonomy_storage->nodeCount($vocabulary->id());
++          }
+           break;
+       }
+     }
+diff --git a/core/modules/taxonomy/taxonomy.views.inc b/core/modules/taxonomy/taxonomy.views.inc
+deleted file mode 100644
+index 2f5718d..0000000
+--- a/core/modules/taxonomy/taxonomy.views.inc
++++ /dev/null
+@@ -1,72 +0,0 @@
+-<?php
+-
+-/**
+- * @file
+- * Provides views data for taxonomy.module.
+- */
+-
+-use Drupal\field\FieldStorageConfigInterface;
+-
+-/**
+- * Implements hook_views_data_alter().
+- */
+-function taxonomy_views_data_alter(&$data) {
+-  $data['node_field_data']['term_node_tid'] = [
+-    'title' => t('Taxonomy terms on node'),
+-    'help' => t('Relate nodes to taxonomy terms, specifying which vocabulary or vocabularies to use. This relationship will cause duplicated records if there are multiple terms.'),
+-    'relationship' => [
+-      'id' => 'node_term_data',
+-      'label' => t('term'),
+-      'base' => 'taxonomy_term_field_data',
+-    ],
+-    'field' => [
+-      'title' => t('All taxonomy terms'),
+-      'help' => t('Display all taxonomy terms associated with a node from specified vocabularies.'),
+-      'id' => 'taxonomy_index_tid',
+-      'no group by' => TRUE,
+-      'click sortable' => FALSE,
+-    ],
+-  ];
+-
+-  $data['node_field_data']['term_node_tid_depth'] = [
+-    'help' => t('Display content if it has the selected taxonomy terms, or children of the selected terms. Due to additional complexity, this has fewer options than the versions without depth.'),
+-    'real field' => 'nid',
+-    'argument' => [
+-      'title' => t('Has taxonomy term ID (with depth)'),
+-      'id' => 'taxonomy_index_tid_depth',
+-      'accept depth modifier' => TRUE,
+-    ],
+-    'filter' => [
+-      'title' => t('Has taxonomy terms (with depth)'),
+-      'id' => 'taxonomy_index_tid_depth',
+-    ],
+-  ];
+-
+-  $data['node_field_data']['term_node_tid_depth_modifier'] = [
+-    'title' => t('Has taxonomy term ID depth modifier'),
+-    'help' => t('Allows the "depth" for Taxonomy: Term ID (with depth) to be modified via an additional contextual filter value.'),
+-    'argument' => [
+-      'id' => 'taxonomy_index_tid_depth_modifier',
+-    ],
+-  ];
+-}
+-
+-/**
+- * Implements hook_field_views_data_alter().
+- *
+- * Views integration for entity reference fields which reference taxonomy terms.
+- * Adds a term relationship to the default field data.
+- *
+- * @see views_field_default_views_data()
+- */
+-function taxonomy_field_views_data_alter(array &$data, FieldStorageConfigInterface $field_storage) {
+-  if ($field_storage->getType() == 'entity_reference' && $field_storage->getSetting('target_type') == 'taxonomy_term') {
+-    foreach ($data as $table_name => $table_data) {
+-      foreach ($table_data as $field_name => $field_data) {
+-        if (isset($field_data['filter']) && $field_name != 'delta') {
+-          $data[$table_name][$field_name]['filter']['id'] = 'taxonomy_index_tid';
+-        }
+-      }
+-    }
+-  }
+-}
+diff --git a/core/modules/taxonomy/tests/src/Functional/TaxonomyTermIndentationTest.php b/core/modules/taxonomy/tests/src/Functional/TaxonomyTermIndentationTest.php
+index 79ccce9..ad5f7ec 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TaxonomyTermIndentationTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TaxonomyTermIndentationTest.php
+@@ -14,7 +14,7 @@ class TaxonomyTermIndentationTest extends TaxonomyTestBase {
+    *
+    * @var array
+    */
+-  protected static $modules = ['taxonomy'];
++  protected static $modules = ['taxonomy', 'node'];
+ 
+   /**
+    * {@inheritdoc}
+diff --git a/core/modules/taxonomy/tests/src/Functional/TaxonomyTermPagerTest.php b/core/modules/taxonomy/tests/src/Functional/TaxonomyTermPagerTest.php
+index e46dc8c..e9dd6fe 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TaxonomyTermPagerTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TaxonomyTermPagerTest.php
+@@ -33,10 +33,7 @@ class TaxonomyTermPagerTest extends TaxonomyTestBase {
+    */
+   protected function setUp(): void {
+     parent::setUp();
+-    $this->drupalLogin($this->drupalCreateUser([
+-      'administer taxonomy',
+-      'bypass node access',
+-    ]));
++    $this->drupalLogin($this->drupalCreateUser(['administer taxonomy']));
+     $this->vocabulary = $this->createVocabulary();
+   }
+ 
+diff --git a/core/modules/taxonomy/tests/src/Functional/TaxonomyTestBase.php b/core/modules/taxonomy/tests/src/Functional/TaxonomyTestBase.php
+index 1a80906..49bef42 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TaxonomyTestBase.php
++++ b/core/modules/taxonomy/tests/src/Functional/TaxonomyTestBase.php
+@@ -28,9 +28,19 @@ protected function setUp(): void {
+     parent::setUp();
+     $this->drupalPlaceBlock('system_breadcrumb_block');
+ 
+-    // Create Basic page and Article node types.
++    // Create Basic page and Article node types if node module is installed.
+     if ($this->profile != 'standard') {
+-      $this->drupalCreateContentType(['type' => 'article', 'name' => 'Article']);
++      $class = get_class($this);
++      $modules = [];
++      while ($class) {
++        if (property_exists($class, 'modules')) {
++          $modules = array_merge($modules, $class::$modules);
++        }
++        $class = get_parent_class($class);
++      }
++      if ($modules && in_array('node', $modules)) {
++        $this->drupalCreateContentType(['type' => 'article', 'name' => 'Article']);
++      }
+     }
+   }
+ 
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermAccessTest.php b/core/modules/taxonomy/tests/src/Functional/TermAccessTest.php
+index a07f0bd..dc7ea23 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermAccessTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermAccessTest.php
+@@ -92,8 +92,9 @@ public function testTermAccess() {
+     $assert_session->statusCodeEquals(403);
+     $this->assertTermAccess($unpublished_term, 'delete', FALSE, "The following permissions are required: 'delete terms in {$vocabulary->id()}' OR 'administer taxonomy'.");
+ 
+-    // Install the Views module and repeat the checks for the 'view' permission.
+-    \Drupal::service('module_installer')->install(['views'], TRUE);
++    // Install the Views and node modules and repeat the checks for the 'view'
++    // permission.
++    \Drupal::service('module_installer')->install(['views', 'node'], TRUE);
+     $this->rebuildContainer();
+ 
+     $this->drupalGet('taxonomy/term/' . $published_term->id());
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermCacheTagsTest.php b/core/modules/taxonomy/tests/src/Functional/TermCacheTagsTest.php
+index f93b380..46fe28d 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermCacheTagsTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermCacheTagsTest.php
+@@ -4,6 +4,8 @@
+ 
+ use Drupal\taxonomy\Entity\Vocabulary;
+ use Drupal\taxonomy\Entity\Term;
++use Drupal\user\Entity\Role;
++use Drupal\user\RoleInterface;
+ use Drupal\Tests\system\Functional\Entity\EntityWithUriCacheTagsTestBase;
+ 
+ /**
+@@ -21,6 +23,19 @@ class TermCacheTagsTest extends EntityWithUriCacheTagsTestBase {
+   /**
+    * {@inheritdoc}
+    */
++  protected function setUp(): void {
++    parent::setUp();
++
++    // Give anonymous users permission to view taxonomy terms, so that we can
++    // verify the cache tags of cached versions of taxonomy term pages.
++    $user_role = Role::load(RoleInterface::ANONYMOUS_ID);
++    $user_role->grantPermission('access content');
++    $user_role->save();
++  }
++
++  /**
++   * {@inheritdoc}
++   */
+   protected $defaultTheme = 'stark';
+ 
+   /**
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermContextualLinksTest.php b/core/modules/taxonomy/tests/src/Functional/TermContextualLinksTest.php
+index acaf372..459861f 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermContextualLinksTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermContextualLinksTest.php
+@@ -29,7 +29,7 @@ public function testTermContextualLinks() {
+     $term = $this->createTerm($vocabulary);
+ 
+     $user = $this->drupalCreateUser([
+-      'administer taxonomy',
++      'access content',
+       'access contextual links',
+     ]);
+     $this->drupalLogin($user);
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermIndexTest.php b/core/modules/taxonomy/tests/src/Functional/TermIndexTest.php
+index a28e013..aa802dd 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermIndexTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermIndexTest.php
+@@ -18,7 +18,7 @@ class TermIndexTest extends TaxonomyTestBase {
+    *
+    * @var array
+    */
+-  protected static $modules = ['views'];
++  protected static $modules = ['node', 'views'];
+ 
+   /**
+    * {@inheritdoc}
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermTest.php b/core/modules/taxonomy/tests/src/Functional/TermTest.php
+index 0c7bf2f..03e9f3d 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermTest.php
+@@ -37,7 +37,7 @@ class TermTest extends TaxonomyTestBase {
+    *
+    * @var string[]
+    */
+-  protected static $modules = ['block'];
++  protected static $modules = ['block', 'node'];
+ 
+   /**
+    * {@inheritdoc}
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermTranslationFieldViewTest.php b/core/modules/taxonomy/tests/src/Functional/TermTranslationFieldViewTest.php
+index 00ad913..8722468 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermTranslationFieldViewTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermTranslationFieldViewTest.php
+@@ -39,7 +39,7 @@ class TermTranslationFieldViewTest extends TaxonomyTestBase {
+    *
+    * @var array
+    */
+-  protected static $modules = ['language', 'content_translation', 'taxonomy'];
++  protected static $modules = ['language', 'content_translation', 'node'];
+ 
+   /**
+    * {@inheritdoc}
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermTranslationTest.php b/core/modules/taxonomy/tests/src/Functional/TermTranslationTest.php
+index 19acc12..8682db9 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermTranslationTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermTranslationTest.php
+@@ -36,7 +36,7 @@ class TermTranslationTest extends TaxonomyTestBase {
+   /**
+    * {@inheritdoc}
+    */
+-  protected static $modules = ['taxonomy', 'language', 'content_translation'];
++  protected static $modules = ['taxonomy', 'language', 'content_translation', 'node'];
+ 
+   /**
+    * {@inheritdoc}
+diff --git a/core/modules/taxonomy/tests/src/Functional/TermTranslationUITest.php b/core/modules/taxonomy/tests/src/Functional/TermTranslationUITest.php
+index 2b4ad75..1cf3673 100644
+--- a/core/modules/taxonomy/tests/src/Functional/TermTranslationUITest.php
++++ b/core/modules/taxonomy/tests/src/Functional/TermTranslationUITest.php
+@@ -73,7 +73,7 @@ protected function setupBundle() {
+    * {@inheritdoc}
+    */
+   protected function getTranslatorPermissions() {
+-    return array_merge(parent::getTranslatorPermissions(), ['administer taxonomy']);
++    return array_merge(parent::getTranslatorPermissions(), ['administer taxonomy', 'access content']);
+   }
+ 
+   /**
+@@ -126,7 +126,7 @@ public function testTranslationUI() {
+    * Tests translate link on vocabulary term list.
+    */
+   public function testTranslateLinkVocabularyAdminPage() {
+-    $this->drupalLogin($this->drupalCreateUser(array_merge(parent::getTranslatorPermissions(), ['access administration pages', 'administer taxonomy'])));
++    $this->drupalLogin($this->drupalCreateUser(array_merge(parent::getTranslatorPermissions(), ['access administration pages', 'administer taxonomy', 'access content'])));
+ 
+     $values = [
+       'name' => $this->randomMachineName(),
+diff --git a/core/modules/taxonomy/tests/src/Functional/Views/TaxonomyTestBase.php b/core/modules/taxonomy/tests/src/Functional/Views/TaxonomyTestBase.php
+index 5ad6b42..39380ef 100644
+--- a/core/modules/taxonomy/tests/src/Functional/Views/TaxonomyTestBase.php
++++ b/core/modules/taxonomy/tests/src/Functional/Views/TaxonomyTestBase.php
+@@ -22,7 +22,7 @@
+    *
+    * @var array
+    */
+-  protected static $modules = ['taxonomy', 'taxonomy_test_views'];
++  protected static $modules = ['taxonomy', 'taxonomy_test_views', 'node'];
+ 
+   /**
+    * Stores the nodes used for the different tests.
+diff --git a/core/modules/taxonomy/tests/src/Functional/VocabularyPermissionsTest.php b/core/modules/taxonomy/tests/src/Functional/VocabularyPermissionsTest.php
+index 43a4ef6..769335e 100644
+--- a/core/modules/taxonomy/tests/src/Functional/VocabularyPermissionsTest.php
++++ b/core/modules/taxonomy/tests/src/Functional/VocabularyPermissionsTest.php
+@@ -250,7 +250,7 @@ public function testVocabularyPermissionsTaxonomyTerm() {
+     $vocabulary = $this->createVocabulary();
+ 
+     // Test as admin user.
+-    $user = $this->drupalCreateUser(['administer taxonomy']);
++    $user = $this->drupalCreateUser(['administer taxonomy', 'access content']);
+     $this->drupalLogin($user);
+ 
+     // Visit the main taxonomy administration page.
+@@ -320,7 +320,7 @@ public function testVocabularyPermissionsTaxonomyTerm() {
+     $assert_session->statusCodeEquals(403);
+ 
+     // Test as user with "edit" permissions.
+-    $user = $this->drupalCreateUser(["edit terms in {$vocabulary->id()}"]);
++    $user = $this->drupalCreateUser(["edit terms in {$vocabulary->id()}", 'access content']);
+     $this->drupalLogin($user);
+ 
+     // Ensure the taxonomy term add form is denied.
+diff --git a/core/modules/views/tests/src/Functional/Plugin/CacheWebTest.php b/core/modules/views/tests/src/Functional/Plugin/CacheWebTest.php
+index 5022a7a..39bd729 100644
+--- a/core/modules/views/tests/src/Functional/Plugin/CacheWebTest.php
++++ b/core/modules/views/tests/src/Functional/Plugin/CacheWebTest.php
+@@ -29,7 +29,7 @@ class CacheWebTest extends ViewTestBase {
+    *
+    * @var array
+    */
+-  protected static $modules = ['taxonomy'];
++  protected static $modules = ['taxonomy', 'node'];
+ 
+   /**
+    * {@inheritdoc}
