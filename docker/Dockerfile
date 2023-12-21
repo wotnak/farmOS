@@ -26,6 +26,10 @@ ARG FARMOS_VERSION=3.x
 ARG PROJECT_REPO=https://github.com/farmOS/composer-project.git
 ARG PROJECT_VERSION=3.x
 
+# Declare the git commit hash argument used for build cache invalidation between
+# different commits on the same branch in GitHub actions.
+ARG GIT_COMMIT=unknown
+
 # Set Apache ServerName directive globally to suppress AH00558 message.
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
 

@@ -46,6 +46,7 @@ jobs:
           build-args: |
             FARMOS_REPO=https://github.com/${{ env.FARMOS_REPO }}
             FARMOS_VERSION=${{ env.FARMOS_VERSION }}
+            GIT_COMMIT=${{ github.sha }}
           tags: farmos/farmos:3.x
           cache-from: type=gha,scope=farmos
           cache-to: type=gha,mode=max,scope=farmos
