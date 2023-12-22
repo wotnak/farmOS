@@ -86,13 +86,13 @@ jobs:
       - name: Pull dev docker image.
         run: docker pull ${{ needs.build.outputs.farmos_workflow_base_image }}-dev
       - name: Run PHP CodeSniffer
-        run: docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs /opt/drupal/web/profiles/farm
+        run: docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --parallel=$(nproc) /opt/drupal/web/profiles/farm
       - name: Run PHPStan
         run: docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpstan analyze --memory-limit 1G /opt/drupal/web/profiles/farm
       - name: Check PHP compatibility of contrib modules and themes (ignore warnings).
         run: |
-          docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/modules
-          docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/themes
+          docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --parallel=$(nproc) --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/modules
+          docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --parallel=$(nproc) --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/themes
   test:
     name: Run PHPUnit tests
     runs-on: ubuntu-latest
