@@ -6,3 +6,4 @@ parameters:
   scanDirectories:
     # Tell PHPStan where to find GeoPHP classes.
     - vendor/itamair/geophp
+  tmpDir: cache
