@@ -34,6 +34,15 @@ jobs:
         run: |
           echo "FARMOS_VERSION=${GITHUB_HEAD_REF}" >> $GITHUB_ENV
           echo "FARMOS_REPO=${{ github.event.pull_request.head.repo.full_name }}" >> $GITHUB_ENV
+      - name: Prepare FARMOS_WORKFLOW_BASE_IMAGE name.
+        run: |
+          echo "FARMOS_WORKFLOW_BASE_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.sha }}" >> $GITHUB_ENV
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
@@ -41,69 +50,49 @@ jobs:
       - name: Build and save farmOS Docker image
         uses: docker/build-push-action@v5
         with:
-          push: false
+          push: true
           context: docker
           build-args: |
             FARMOS_REPO=https://github.com/${{ env.FARMOS_REPO }}
             FARMOS_VERSION=${{ env.FARMOS_VERSION }}
             GIT_COMMIT=${{ github.sha }}
-          tags: farmos/farmos:3.x
+          tags: ${{ env.FARMOS_WORKFLOW_BASE_IMAGE }}
           cache-from: type=gha,scope=farmos
           cache-to: type=gha,mode=max,scope=farmos
-          outputs: type=docker,dest=/tmp/farmos.tar
-      - name: Upload farmOS Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: farmos
-          path: /tmp/farmos.tar
-          retention-days: 1
-          compression-level: 0
       # This builds the dev Docker image using the specified FARMOS_VERSION,
       # but notably it does NOT override the default PROJECT_VERSION, so the
       # farmOS Composer project 3.x branch is always used.
       - name: Build and save farmOS dev Docker image
         uses: docker/build-push-action@v5
         with:
-          push: false
+          push: true
           context: docker/dev
+          build-contexts: |
+            farmos/farmos:3.x=docker-image://${{ env.FARMOS_WORKFLOW_BASE_IMAGE }}
           build-args: |
             FARMOS_REPO=https://github.com/${{ env.FARMOS_REPO }}
             FARMOS_VERSION=${{ env.FARMOS_VERSION }}
-          tags: farmos/farmos:3.x-dev
+          tags: ${{ env.FARMOS_WORKFLOW_BASE_IMAGE }}-dev
           cache-from: type=gha,scope=farmos-dev
           cache-to: type=gha,mode=max,scope=farmos-dev
-          outputs: type=docker,dest=/tmp/farmos-dev.tar
-      - name: Upload farmOS dev Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: farmos-dev
-          path: /tmp/farmos-dev.tar
-          retention-days: 1
-          compression-level: 0
     outputs:
       farmos_version: ${{ env.FARMOS_VERSION }}
+      farmos_workflow_base_image: ${{ env.FARMOS_WORKFLOW_BASE_IMAGE }}
   sniff:
     name: Run PHP Codesniffer and PHPStan
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Checkout the repository
-        uses: actions/checkout@v3
-      - name: Download built earlier farmOS dev Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: farmos-dev
-          path: /tmp
-      - name: Load farmos/farmos:3.x-dev image
-        run: docker load < /tmp/farmos-dev.tar
+      - name: Pull dev docker image.
+        run: docker pull ${{ needs.build.outputs.farmos_workflow_base_image }}-dev
       - name: Run PHP CodeSniffer
-        run: docker run farmos/farmos:3.x-dev phpcs /opt/drupal/web/profiles/farm
+        run: docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs /opt/drupal/web/profiles/farm
       - name: Run PHPStan
-        run: docker run farmos/farmos:3.x-dev phpstan analyze --memory-limit 1G /opt/drupal/web/profiles/farm
+        run: docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpstan analyze --memory-limit 1G /opt/drupal/web/profiles/farm
       - name: Check PHP compatibility of contrib modules and themes (ignore warnings).
         run: |
-          docker run farmos/farmos:3.x-dev phpcs --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/modules
-          docker run farmos/farmos:3.x-dev phpcs --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/themes
+          docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/modules
+          docker run ${{ needs.build.outputs.farmos_workflow_base_image }}-dev phpcs --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/themes
   test:
     name: Run PHPUnit tests
     runs-on: ubuntu-latest
@@ -126,13 +115,8 @@ jobs:
         run: echo "matrix.dbms=${{ matrix.dbms }}, matrix.DB_URL=${{ matrix.DB_URL }}"
       - name: Checkout the repository
         uses: actions/checkout@v3
-      - name: Download built earlier farmOS dev Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: farmos-dev
-          path: /tmp
-      - name: Load farmos/farmos:3.x-dev image
-        run: docker load < /tmp/farmos-dev.tar
+      - name: Pull dev docker image.
+        run: docker pull ${{ needs.build.outputs.farmos_workflow_base_image }}-dev
       # Build a new docker-compose.yml file from docker-compose.testing.common + docker-compose.testing.{dbms}.yml.
       # Copy to the current directory so that farmOS volume mounts don't change to the docker/www folder.
       - name: Create docker-compose.yml
@@ -141,6 +125,7 @@ jobs:
         run: |
           cp docker/docker-compose.testing.* .
           docker compose -f docker-compose.testing.common.yml -f docker-compose.testing.${{ matrix.dbms }}.yml config > docker-compose.yml
+          sed -i "s|image: farmos/farmos:3.x-dev|image: ${{ needs.build.outputs.farmos_workflow_base_image }}-dev|g" docker-compose.yml
       - name: Start containers
         run: docker compose up -d
       - name: Wait until www container is ready
@@ -164,15 +149,8 @@ jobs:
     steps:
       - name: Set FARMOS_VERSION from previous output.
         run: echo "FARMOS_VERSION=${{ needs.build.outputs.farmos_version }}" >> $GITHUB_ENV
-      - name: Download built earlier farmOS Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: farmos
-          path: /tmp
-      - name: Load farmos/farmos:3.x image
-        run: docker load < /tmp/farmos.tar
       - name: Run farmOS Docker container
-        run: docker run --rm -v /tmp/farmOS:/opt/drupal farmos/farmos:3.x true
+        run: docker run --rm -v /tmp/farmOS:/opt/drupal ${{ needs.build.outputs.farmos_workflow_base_image }} true
       - name: Create artifact
         run: cd /tmp && tar -czf farmOS-${FARMOS_VERSION}.tar.gz farmOS
       - name: Create GitHub release
@@ -196,20 +174,12 @@ jobs:
     steps:
       - name: Set FARMOS_VERSION from previous output.
         run: echo "FARMOS_VERSION=${{ needs.build.outputs.farmos_version }}" >> $GITHUB_ENV
-      - name: Download built earlier farmOS Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: farmos
-          path: /tmp
-      - name: Load farmos/farmos:3.x image
-        run: docker load < /tmp/farmos.tar
-      - name: Download built earlier farmOS dev Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: farmos-dev
-          path: /tmp
-      - name: Load farmos/farmos:3.x-dev image
-        run: docker load < /tmp/farmos-dev.tar
+      - name: Pull docker images.
+        run: |
+          docker pull ${{ needs.build.outputs.farmos_workflow_base_image }}
+          docker tag ${{ needs.build.outputs.farmos_workflow_base_image }} farmos/farmos:3.x
+          docker pull ${{ needs.build.outputs.farmos_workflow_base_image }}-dev
+          docker tag ${{ needs.build.outputs.farmos_workflow_base_image }}-dev farmos/farmos:3.x-dev
       - name: Login to Docker Hub.
         uses: docker/login-action@v2
         with:
