@@ -55,7 +55,7 @@ RUN build-farmOS.sh
 # Create layer with farmOS sources.
 FROM composer-file as farmos-sources
 
-# Install sources.
+# Install production dependencies.
 RUN composer install --no-dev
 
 # Set the version in farm.info.yml.
@@ -63,13 +63,10 @@ RUN sed -i "s|version: 3.x|version: ${FARMOS_VERSION}|g" ${FARMOS_PATH}/web/prof
 
 ##
 # Create layer with farmOS dev sources.
-FROM composer-file as farmos-dev-sources
+FROM farmos-sources as farmos-dev-sources
 
-# Install sources.
-RUN composer install
-
-# Set the version in farm.info.yml.
-RUN sed -i "s|version: 3.x|version: ${FARMOS_VERSION}|g" ${FARMOS_PATH}/web/profiles/farm/farm.info.yml
+# Install dev dependencies additionally to already installed production dependencies.
+RUN composer update
 
 ##
 # Dependencies layer.
