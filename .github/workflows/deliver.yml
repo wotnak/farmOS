@@ -71,13 +71,36 @@ jobs:
           key: farmos-dev-${{ github.run_id }}
       - name: Load farmos/farmos:3.x-dev image
         run: docker load < /tmp/farmos-dev.tar
+      - name: Load phpcs cache
+        uses: actions/cache/restore@v3
+        with:
+          path: |
+            /tmp/.phpcs.cache.farmos
+            /tmp/.phpcs.cache.contrib
+          key: phpcs-${{ hashFiles('/tmp/.phpcs.cache.farmos', '/tmp/.phpcs.cache.contrib') }}
+          restore-keys: phpcs-
       - name: Run PHP CodeSniffer
-        run: docker run farmos/farmos:3.x-dev phpcs --parallel=$(nproc) /opt/drupal/web/profiles/farm
+        run: |
+          docker run \
+            -v /tmp/:/opt/drupal/tmp/ \
+            farmos/farmos:3.x-dev \
+            phpcs --cache=/opt/drupal/tmp/.phpcs.cache.farmos --parallel=$(nproc) /opt/drupal/web/profiles/farm
       - name: Run PHPStan
         run: docker run farmos/farmos:3.x-dev phpstan analyze --memory-limit 1G /opt/drupal/web/profiles/farm
       - name: Check PHP compatibility of contrib modules and themes (ignore warnings).
         run: |
-          docker run farmos/farmos:3.x-dev phpcs --parallel=$(nproc) --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/modules /opt/drupal/web/themes
+          docker run \
+            -v /tmp/:/opt/drupal/tmp/ \
+            farmos/farmos:3.x-dev \
+            phpcs --cache=/opt/drupal/tmp/.phpcs.cache.contrib --parallel=$(nproc) --standard=PHPCompatibility --runtime-set testVersion 8.2- --warning-severity=0 /opt/drupal/web/modules /opt/drupal/web/themes
+      - name: Save phpcs cache
+        uses: actions/cache/save@v3
+        with:
+          path: |
+            /tmp/.phpcs.cache.farmos
+            /tmp/.phpcs.cache.contrib
+          key: phpcs-${{ hashFiles('/tmp/.phpcs.cache.farmos', '/tmp/.phpcs.cache.contrib') }}
+
   test:
     name: Run PHPUnit tests
     runs-on: ubuntu-latest
