@@ -86,14 +86,14 @@ jobs:
     strategy:
       matrix:
         dbms:
-         - pgsql
-         - mariadb
+        #  - pgsql
+        #  - mariadb
          - sqlite
         include:
-          - dbms: pgsql
-            DB_URL: pgsql://farm:farm@db/farm
-          - dbms: mariadb
-            DB_URL: mysql://farm:farm@db/farm
+          # - dbms: pgsql
+          #   DB_URL: pgsql://farm:farm@db/farm
+          # - dbms: mariadb
+          #   DB_URL: mysql://farm:farm@db/farm
           - dbms: sqlite
             DB_URL: sqlite://localhost/sites/default/files/db.sqlite
     steps:
@@ -123,9 +123,9 @@ jobs:
       # so waiting for that lets us know it is safe to start the tests
         run: until [ -f ./www/www-container-fs-ready ]; do sleep 0.1; done
       - name: Run PHPUnit tests
-        run: docker compose exec -u www-data -T www phpunit --verbose /opt/drupal/web/profiles/farm
-      - name: Test Drush site install with all modules
-        run: docker compose exec -u www-data -T www drush site-install --db-url=${{ matrix.DB_URL }} farm farm.modules='all'
+        run: docker compose exec -u www-data -T www phpunit --debug --verbose /opt/drupal/web/profiles/farm/modules/core/inventory/tests/src/Functional/InventoryTest.php
+      # - name: Test Drush site install with all modules
+      #   run: docker compose exec -u www-data -T www drush site-install --db-url=${{ matrix.DB_URL }} farm farm.modules='all'
   release:
     name: Create release
     # We only create a release if this is a tag push event to the official

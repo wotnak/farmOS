@@ -108,6 +108,7 @@ class InventoryTest extends FarmBrowserTestBase {
 
     // Confirm that the asset's inventory was updated in the API.
     $response = $this->requestApiEntity($asset);
+    dump($response);
     $this->assertNotEmpty($response['data']['attributes']['inventory']);
     $this->assertEquals('volume', $response['data']['attributes']['inventory'][0]['measure']);
     $this->assertEquals('2', $response['data']['attributes']['inventory'][0]['value']);
