@@ -29,6 +29,21 @@
         interactions: {
           onFocusOnly: true
         },
+        // Allow to translate map ui.
+        baseLayersGroupTitle: Drupal.t('Base layers', {}, { context: 'farm_map' }),
+        zoomOptions: {
+          zoomInTipLabel: Drupal.t('Zoom in', {}, { context: 'farm_map' }),
+          zoomOutTipLabel: Drupal.t('Zoom out', {}, { context: 'farm_map' }),
+        },
+        rotateOptions: {
+          tipLabel: Drupal.t('Reset rotation', {}, { context: 'farm_map' }),
+        },
+        attributionOptions: {
+          tipLabel: Drupal.t('Attributions', {}, { context: 'farm_map' }),
+        },
+        fullScreenOptions: {
+          tipLabel: Drupal.t('Toggle full-screen', {}, { context: 'farm_map' }),
+        },
       };
 
       const mapOptions = {

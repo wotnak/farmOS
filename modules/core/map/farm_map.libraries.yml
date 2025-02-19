@@ -20,6 +20,7 @@ farmOS-map:
     theme:
       /libraries/farmOS-map/farmOS-map.css: { }
   dependencies:
+    - core/drupal
     - core/drupalSettings
     - farm_map/farm_map_public_path
 

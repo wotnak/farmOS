@@ -1,4 +1,4 @@
-(function (drupalSettings) {
+(function (Drupal, drupalSettings) {
   farmOS.map.behaviors.mapbox = {
     attach: function (instance) {
       var key = drupalSettings.farm_map.behaviors.mapbox.api_key;
@@ -21,11 +21,11 @@
         crossOrigin: 'anonymous',
         tileSize: 512,
         attribution: attribution,
-        group: 'Base layers',
+        group: Drupal.t('Base layers'),
         base: true,
         visible: visible,
       };
       instance.addLayer('xyz', opts);
     }
   };
-}(drupalSettings));
+}(Drupal, drupalSettings));
